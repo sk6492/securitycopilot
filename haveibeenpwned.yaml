@@ -23,6 +23,8 @@ paths:
     get:
       operationId: breachedaccount
       summary: Getting all breaches for an account.
+      security:
+        - ApiKeyAuth: []
       parameters:
         - in: path
           name: account
