@@ -1,0 +1,16 @@
+Descriptor:
+  Name: Have I been Pwned
+  DisplayName: Have I been Pwned
+  Description: An API to interact with haveibeenpwned.com
+  SupportedAuthTypes:
+    - ApiKey
+  Authorization:
+    Type: APIKey
+    Key: key
+    Location: QueryParams
+    AuthScheme: ''
+
+SkillGroups:
+  - Format: API
+    Settings:
+      OpenApiSpecUrl: https://raw.githubusercontent.com/sk6492/securitycopilot/main/haveibeenpwned.yaml
