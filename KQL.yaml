@@ -1,0 +1,312 @@
+Descriptor:
+  Name: KQL Query
+  DisplayName: "KQL Queries"
+  Description: pullback sentinel incident comments
+SkillGroups:
+  - Format: KQL
+    Skills:
+      - Name: fetch sentinel incident comments
+        DisplayName: fetch sentinel incident comments
+        Description: Fetches the given sentinel incident comments
+        Inputs:
+          - Name: incidentNumber
+            Description: incident number
+            Required: true
+        Settings:
+          Target: Sentinel
+          TenantId: 7db30361-ce9f-4244-8d28-60553bffff38
+          SubscriptionId: ba28cfea-9c47-4db9-a718-3902a5046e1f
+          ResourceGroupName: workspaces 
+          WorkspaceName: NAISSC
+
+          Template: |- 
+            SecurityIncident
+            | where TimeGenerated > ago(14d) 
+            | where IncidentNumber == '{{incidentNumber}}' 
+            | summarize arg_max(TimeGenerated, *) by IncidentNumber 
+            | where isnotempty( Comments) and Comments != '[]' 
+            | project Comments
+ 
+      - Name: Get KQL query or detection rule for give sentinel incident.
+        DisplayName: Get sentinel incident analytic rule.
+        Description: Fetches KQL query for the analytic rule for the given sentinel incident id
+        Inputs:
+          - Name: incidentNumber
+            Description: incident number
+            Required: true
+        Settings:
+          Target: Sentinel
+          TenantId: 7db30361-ce9f-4244-8d28-60553bffff38
+          SubscriptionId: ba28cfea-9c47-4db9-a718-3902a5046e1f
+          ResourceGroupName: workspaces 
+          WorkspaceName: NAISSC
+
+          Template: |- 
+            SecurityIncident
+            | where IncidentNumber == '{{incidentNumber}}' 
+            | mv-expand AlertIds
+            | extend AlertIds=tostring(AlertIds)
+            | summarize arg_max(LastModifiedTime,AlertIds, Labels) by IncidentNumber
+            | join kind=leftouter ( SecurityAlert
+            | summarize arg_max(TimeGenerated, *) by AlertIds=SystemAlertId) on AlertIds
+            | extend OriginalQuery_ = tostring(parse_json(ExtendedProperties).OriginalQuery)
+            | where isnotempty(OriginalQuery_ )
+            | distinct OriginalQuery_
+ 
+
+      - Name: GetEmailsByRecipient
+        DisplayName: Get Latest Emails By Recipient
+        Description: Fetches the latest emails sent by the specified email address or sender domain.
+        Inputs:
+          - Name: email
+            Description: The email address of the recipient
+            Required: true
+        Settings:
+          Target: Defender
+          Template: |-
+            EmailEvents
+            | where Timestamp > ago(14d) 
+            | where RecipientEmailAddress =~ '{{email}}'
+            | project Timestamp, NetworkMessageId, SenderFromAddress, SenderDisplayName,RecipientEmailAddress, Subject, DeliveryAction
+            | join kind=leftouter ( EmailAttachmentInfo | summarize EmailAttachment = make_set(FileName), FileHashes=make_set(SHA256) by NetworkMessageId  ) on NetworkMessageId 
+            | join kind=leftouter ( EmailUrlInfo | summarize EmailAttachment = make_set(Url) by NetworkMessageId  ) on NetworkMessageId | project-away NetworkMessageId1, NetworkMessageId2
+            | top 100 by Timestamp desc
+            
+      - Name: GetEmailsByFileAttachment
+        DisplayName: Get Emails with given File Attachment or SHA254 FIle hash
+        Description: Fetches the emails with provided file name or file hash as email Attachments.
+        Inputs:
+          - Name: AttachmentName
+            Description: The File Name of the email Attachment.
+            DefaultValue: "EmptyNULL"
+            Required: false
+          - Name: SHA256
+            DefaultValue: " "
+            Description: The SHA256 File Hash of the email Attachment.
+            Required: false
+        Settings:
+          Target: Defender
+          Template: |-
+            EmailAttachmentInfo 
+            | where Timestamp > ago(14d)
+            | where FileName contains '{{AttachmentName}}' or SHA256 == '{{SHA256}}' 
+            | summarize EmailAttachment = make_set(FileName), FileHashes=make_set(SHA256) by NetworkMessageId
+            | join kind=leftouter (EmailEvents | project Timestamp, NetworkMessageId, SenderFromAddress, SenderDisplayName,RecipientEmailAddress, Subject, DeliveryAction ) on NetworkMessageId
+            | join kind=leftouter ( EmailUrlInfo | summarize EmailAttachment = make_set(Url) by NetworkMessageId  ) on NetworkMessageId | project-away NetworkMessageId1, NetworkMessageId2
+            | top 100 by Timestamp desc
+            
+      - Name: GetEmailsByUrl
+        DisplayName: Get Emails with given URL in the email body.
+        Description: Fetches the emails with provided url.
+        Inputs:
+          - Name: URL
+            Description: URL or domain.
+            Required: true
+        Settings:
+          Target: Defender
+          Template: |-
+            EmailUrlInfo 
+            | where Timestamp > ago(14d)
+            | where Url contains '{{URL}}'
+            | summarize EmailAttachment = make_set(Url) by NetworkMessageId 
+            | join kind=leftouter (EmailEvents | project Timestamp, NetworkMessageId, SenderFromAddress, SenderDisplayName,RecipientEmailAddress, Subject, DeliveryAction ) on NetworkMessageId
+            | join kind=leftouter ( EmailAttachmentInfo | summarize EmailAttachment = make_set(FileName), FileHashes=make_set(SHA256) by NetworkMessageId  ) on NetworkMessageId 
+            | project-away NetworkMessageId1, NetworkMessageId2
+            | top 100 by Timestamp desc
+          
+            
+      - Name: GetEmailsBySender
+        DisplayName: Get Latest Emails By Sender or Sender domain
+        Description: Fetches the latest emails sent by the specified email address or sender domain.
+        Inputs:
+          - Name: sender
+            Description: The email address of the Sender
+            DefaultValue: "EmptyNULL"
+            Required: false
+          - Name: senderdomain
+            DefaultValue: "EmptyNULL"
+            Description: The domain of the email Sender
+            Required: false
+        Settings:
+          Target: Defender
+          Template: |-
+            EmailEvents
+            | where Timestamp > ago(14d) 
+            | where SenderFromAddress =~ '{{sender}}' or SenderMailFromAddress =~ '{{sender}}' or SenderMailFromDomain =~ '{{senderdomain}}' or SenderFromDomain =~ '{{senderdomain}}'
+            | project Timestamp, NetworkMessageId, SenderFromAddress, SenderDisplayName,RecipientEmailAddress, Subject, DeliveryAction
+            | join kind=leftouter ( EmailAttachmentInfo | summarize EmailAttachment = make_set(FileName), FileHashes=make_set(SHA256) by NetworkMessageId  ) on NetworkMessageId 
+            | join kind=leftouter ( EmailUrlInfo | summarize EmailAttachment = make_set(Url) by NetworkMessageId  ) on NetworkMessageId | project-away NetworkMessageId1, NetworkMessageId2
+            | top 100 by Timestamp desc
+           
+      - Name: GetDeviceFromIPAddress
+        DisplayName: Get device name for given IP Address.
+        Description: Fetches the device the IP Address belongs to.
+        Inputs:
+          - Name: IPAddress
+            Description: The local IP address
+            Required: true
+        Settings:
+          Target: Sentinel
+          TenantId: 7db30361-ce9f-4244-8d28-60553bffff38
+          SubscriptionId: ba28cfea-9c47-4db9-a718-3902a5046e1f
+          ResourceGroupName: workspaces 
+          WorkspaceName: NAISSC
+
+          Template: |- 
+            union
+            (DeviceNetworkInfo 
+            | where TimeGenerated > ago(14d)
+            | mv-expand todynamic(IPAddresses)
+            | extend IPAddresses = tostring(IPAddresses.IPAddress)
+            | where IPAddresses in ('{{IPAddress}}')
+            | summarize arg_max(TimeGenerated, *) by DeviceName, ip_s=tostring(IPAddresses), tostring(ConnectedNetworks), mac_s=MacAddress,manufacturer_s=NetworkAdapterVendor
+            ),
+            (MerakiClients_CL
+            | where TimeGenerated > ago(14d)
+            | where ip_s in ('{{IPAddress}}')
+            | summarize arg_max(TimeGenerated, *) by ip_s),
+            (Heartbeat
+            | where ComputerIP in ('{{IPAddress}}')
+            | summarize by ComputerIP, DeviceName=Computer)
+            
+      - Name: TraffictoURL
+        DisplayName: Get Traffic or clicks made to a given URL.
+        Description: Fetches the device the IP Address belongs to.
+        Inputs:
+          - Name: URL
+            Description: URL Address
+            Required: true
+        Settings:
+          Target: Sentinel
+          TenantId: 7db30361-ce9f-4244-8d28-60553bffff38
+          SubscriptionId: ba28cfea-9c47-4db9-a718-3902a5046e1f
+          ResourceGroupName: workspaces 
+          WorkspaceName: NAISSC
+
+          Template: |- 
+            union
+            (DeviceEvents
+            | where TimeGenerated > ago(14d)
+            | where ActionType== "BrowserLaunchedToOpenUrl"
+            | where AdditionalFields contains '{{URL}}'
+            ),
+            (ProofpointURLisolation_CL
+            | where TimeGenerated > ago(14d)
+            | where url_s contains '{{URL}}'
+            | project TimeGenerated=date_t, userName_s, url_s, disposition_s, region_s
+            ),
+            (
+            union ProofPointTAPClicks*
+            | where TimeGenerated > ago(14d)
+            | where url_s contains '{{URL}}'
+            | project  url_s, classification_s, clickTime_t, threatTime_t, clickIP_s,userAgent_s, sender_s, recipient_s, senderIP_s, threatURL_s, threatStatus_s, messageID_s,  Type
+            ),
+            (
+            UrlClickEvents
+            | where TimeGenerated > ago(14d)
+            | where Url contains '{{URL}}'
+            | project TimeGenerated, ActionType,IsClickedThrough,AccountUpn, NetworkMessageId, IPAddress,  UrlChain
+            )
+
+      - Name: GetFileEvents
+        DisplayName: Hunt for file creation or download activtiy by FileName or SHA256 hash.
+        Description: Fetches the latest emails sent by the specified email address or sender domain.
+        Inputs:
+          - Name: filename
+            Description: The name of the file.
+            DefaultValue: "EmptyNULL"
+            Required: false
+          - Name: sha256
+            DefaultValue: "EmptyNULL"
+            Description: The sha256 hash for the file.
+            Required: false
+        Settings:
+          Target: Defender
+          Template: |-
+            union(DeviceFileEvents
+            | where Timestamp > ago(120d)
+            | where FileName contains '{{filename}}' or SHA256 == '{{sha256}}'
+            | project Timestamp,ActionType, FolderPath,DeviceName, Account=strcat(InitiatingProcessAccountDomain,"\\",InitiatingProcessAccountName,"  ", InitiatingProcessAccountUpn), InitiatingProcessFolderPath,Procchain=strcat(InitiatingProcessParentFileName," -> ",InitiatingProcessFileName," -> ",FileName), InitiatingProcessCommandLine,  SHA256, InitiatingProcessSHA256,InitiatingProcessTokenElevation,InitiatingProcessIntegrityLevel, FileOriginUrl, FileOriginReferrerUrl
+            | top 100 by Timestamp desc),
+            (DeviceEvents
+            | where Timestamp > ago(120d)
+            | where FileName contains '{{filename}}'
+            | where ActionType in ("AntivirusReport", "AntivirusDetection")
+            | project Timestamp, DeviceName, FileName, FolderPath, InitiatingProcessAccountName, SHA1, AdditionalFields)
+
+      - Name: GetNetworkEvent
+        DisplayName: Hunt for traffic to an IP Address or Remote URL.
+        Description: Fetches for traffic to an IP or Remote URL.
+        Inputs:
+          - Name: RemoteIP
+            Description: The name of the file.
+            DefaultValue: "EmptyNULL"
+            Required: false
+          - Name: RemoteURL
+            DefaultValue: "EmptyNULL"
+            Description: The sha256 hash for the file.
+            Required: false
+        Settings:
+          Target: Defender
+          Template: |-
+            DeviceNetworkEvents
+            | where Timestamp > ago(120d)
+            | where RemoteIP == '{{RemoteIP}}' or RemoteURL contains '{{RemoteURL}}'
+            | project Timestamp,  ActionType,  DeviceName, Account=strcat(InitiatingProcessAccountDomain,"\\",InitiatingProcessAccountName,"  ", InitiatingProcessAccountUpn),LocalIP, LocalPort, RemoteIP, RemotePort, Protocol, LocalIPType, RemoteIPType, Procchain=strcat(InitiatingProcessParentFileName," -> ",InitiatingProcessFileName), InitiatingProcessFolderPath, InitiatingProcessCommandLine, InitiatingProcessSHA256,InitiatingProcessTokenElevation,AdditionalFields, RemoteUrl
+            | top 100 by Timestamp desc
+
+
+      - Name: GetUserSigninLogs
+        DisplayName: Get Entra or AzureAD Signin logs for a given user.
+        Description: Fetches Entra signin logs for a given user or IP Address.
+        Inputs:
+          - Name: IPAddress
+            Description: The source IP address the signins came from.
+            DefaultValue: "EmptyNULL"
+            Required: false
+          - Name: UserName
+            Description: UserPrincipalName or UPN or SAM account name or full name of the user.
+            DefaultValue: "EmptyNULL"
+            Required: false
+        Settings:
+          Target: Sentinel
+          TenantId: 7db30361-ce9f-4244-8d28-60553bffff38
+          SubscriptionId: ba28cfea-9c47-4db9-a718-3902a5046e1f
+          ResourceGroupName: workspaces 
+          WorkspaceName: NAISSC
+
+          Template: |- 
+            union AADNonInteractiveUserSignInLogs , SigninLogs
+            | where TimeGenerated >= now() - 30d
+            | where UserPrincipalName contains "{{UserName}}" or Identity contains "{{UserName}}" or IPAddress == "{{IPAddress}}"
+            | summarize FirstLoginin7Days = min(TimeGenerated), LastSeenLoginin7days = max(TimeGenerated), count() by User=strcat(Identity," (",UserPrincipalName,")"),IPAddress, Type, app=strcat(AppDisplayName, "->",ResourceDisplayName), NetworkLocationDetails,ResultDescription,ResultType,location=strcat(tostring(parse_json(LocationDetails_string).city),", ",tostring(parse_json(LocationDetails_string).state),", ",Location),risk=strcat(RiskDetail, " ", RiskState, " ", tostring(RiskEventTypes_V2)),device=strcat(tostring(DeviceDetail_string),", ", UserAgent),AuthenticationRequirement, AlternateSignInName, UserId
+            | order by LastSeenLoginin7days
+            
+      - Name: GetUserInternalSigninLogs
+        DisplayName: Get Active Direcory or Internal Signin logs for a given user.
+        Description: Fetches Active Direcory or Domain Controller based signin logs for a given user on a workstation.
+        Inputs:
+          - Name: User
+            Description: UserPrincipalName or UPN or SAM account name of the user.
+            DefaultValue: "EmptyNULL"
+            Required: true
+        Settings:
+          Target: Sentinel
+          TenantId: 7db30361-ce9f-4244-8d28-60553bffff38
+          SubscriptionId: ba28cfea-9c47-4db9-a718-3902a5046e1f
+          ResourceGroupName: workspaces 
+          WorkspaceName: NAISSC
+
+          Template: |- 
+            SecurityEvent
+            | where TimeGenerated > ago(30d)
+            | where EventID in (4768, 4648, 4624, 4625,4771,4776)
+            | where TargetAccount contains "{{User}}"
+            | extend IpAddress = iff(IpAddress contains "ffff", replace_string(IpAddress, '::ffff:', ''), IpAddress)
+            | summarize FirstLoginin7Days = min(TimeGenerated), LastSeenLoginin7days = max(TimeGenerated),count() by LogonTypeName, TargetAccount,WorkstationName,FailureReason,IpAddress, Computer, EventID, Status,SubStatus, Process
+            | join  kind=leftouter(DeviceNetworkInfo
+            | mv-expand IPAddresses
+            | where IPAddresses.AddressType == "Private"
+            | extend IPAddresses = tostring(parse_json(IPAddresses).IPAddress)
+            | summarize arg_max(TimeGenerated, DeviceName) by IPAddresses
+            | project-away TimeGenerated) on $left.IpAddress == $right.IPAddresses 
