@@ -15,8 +15,8 @@ components:
       name: hibp-api-key
 
 tags:
-  - name: Search Methods
-    description: Endpoints related to searching on Shodan
+  - name: is the account pwned
+    description: Is the account part of any breached database.
 
 paths:
   /breachedaccount/{account}:
